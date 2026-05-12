@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SocialTrust - GitHub Repository Trust Analysis</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="simple-shell">
+        <div class="simple-card">
+            <h1 class="simple-title">SocialTrust</h1>
+            <p class="simple-subtitle">SocialTrust will auto-generate a markdown file that presents the percentile rankings of summarized statistics such as contributor participation, usage popularity, and issue maintenance. We created SocialTrust to help open-source consumers understand whether their dependencies are safe and to assist open-source maintainers in improving their repository management.</p>
+
+            <form id="analyzeForm" class="simple-form">
+
+                <label class="simple-label" for="github_token">
+                    GitHub Token
+                    <a class="simple-help-link" href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens" target="_blank" rel="noopener noreferrer">
+                        How to get a GitHub token?
+                    </a>
+                </label>
+                <div class="simple-input-row">
+                    <input
+                        type="password"
+                        id="github_token"
+                        name="github_token"
+                        placeholder="Paste token here"
+                        required
+                    >
+                </div>
+
+                <label class="simple-label" for="github_url">GitHub Repository URL</label>
+                <div class="simple-input-row">
+                    <input 
+                        type="text" 
+                        id="github_url" 
+                        name="github_url" 
+                        placeholder="https://github.com/owner/repository"
+                        required
+                    >
+                    <button type="submit" class="btn btn-primary">
+                        Analyze
+                    </button>
+                </div>
+                <label class="simple-checkbox">
+                    <input type="checkbox" id="create_pr" name="create_pr">
+                    Create Pull Request with report
+                </label>
+            </form>
+                
+        </div>
+
+        <div id="result" class="simple-result" style="display: none;"></div>
+    </main>
+
+    <script>
+        const form = document.getElementById('analyzeForm');
+        const resultBox = document.getElementById('result');
+        const formElements = form.querySelectorAll('input, button');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const githubUrl = document.getElementById('github_url').value;
+            const githubToken = document.getElementById('github_token').value;
+            const createPrEl = document.getElementById('create_pr');
+            const createPr = createPrEl ? createPrEl.checked : false;
+            
+            // Disable form during processing
+            formElements.forEach((el) => {
+                el.disabled = true;
+            });
+            resultBox.style.display = 'none';
+            resultBox.innerHTML = '';
+            
+            // Start analysis
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        github_url: githubUrl,
+                        github_token: githubToken,
+                        create_pr: createPr
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Poll for status
+                    pollStatus(result.job_id);
+                } else {
+                    alert('Error: ' + result.error);
+                    formElements.forEach((el) => {
+                        el.disabled = false;
+                    });
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+                formElements.forEach((el) => {
+                    el.disabled = false;
+                });
+            }
+        });
+
+        function pollStatus(jobId) {
+            const interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/status/${jobId}`);
+                    const status = await response.json();
+                    
+                    if (status.status === 'completed') {
+                        clearInterval(interval);
+                        resultBox.style.display = 'block';
+                        resultBox.innerHTML = `
+                            <p><strong>Done.</strong></p>
+                            <p><strong>Repository:</strong> ${status.owner}/${status.repo}</p>
+                            <p><strong>README:</strong> ${status.readme_path}</p>
+                            <p><strong>Details:</strong> ${status.details_path}</p>
+                            <p><strong>Images:</strong> ${status.images_path}</p>
+                            ${status.pr_url ? `<p><strong>Pull Request:</strong> <a href="${status.pr_url}" target="_blank" rel="noopener noreferrer">${status.pr_url}</a></p>` : ''}
+                            ${status.pr_error ? `<p><strong>PR Error:</strong> ${status.pr_error}</p>` : ''}
+                        `;
+                        formElements.forEach((el) => {
+                            el.disabled = false;
+                        });
+                    } else if (status.status === 'error') {
+                        clearInterval(interval);
+                        resultBox.style.display = 'block';
+                        resultBox.innerHTML = `<p><strong>Error:</strong> ${status.message}</p>`;
+                        formElements.forEach((el) => {
+                            el.disabled = false;
+                        });
+                    }
+                } catch (error) {
+                    clearInterval(interval);
+                    alert('Error checking status: ' + error.message);
+                }
+            }, 2000); // Poll every 2 seconds
+        }
+
+    </script>
+</body>
+</html>
